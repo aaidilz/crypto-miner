@@ -122,12 +122,23 @@
   </head>
   <body>
     <header>
-      <h1>Crypto Mining Tycoon</h1>
-      <nav>
-        <a href="/">Dashboard</a>
-        <a href="/shop">Shop</a>
-        <a href="/upgrades">Upgrades</a>
-      </nav>
+      <div style="display:flex; align-items:flex-end; justify-content:space-between; gap:16px;">
+        <div>
+          <h1>Crypto Mining Tycoon</h1>
+          <nav>
+            <a href="/">Dashboard</a>
+            <a href="/shop">Shop</a>
+            <a href="/upgrades">Upgrades</a>
+          </nav>
+        </div>
+
+        {% if money is defined %}
+          <div style="display:flex; align-items:center; gap:8px; padding:8px 10px; border:1px solid var(--border); border-radius:12px; background: rgba(255,255,255,0.04);">
+            <div class="muted" style="font-size:12px;">Money</div>
+            <div style="font-weight:800;">${{ money }}</div>
+          </div>
+        {% endif %}
+      </div>
     </header>
 
     <div class="container">

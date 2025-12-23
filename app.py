@@ -168,7 +168,7 @@ def shop():
 
     This replaces the CLI shop listing.
     """
-    return render_template("shop.html", miners=AVAILABLE_MINERS, owned=game.miners_owned)
+    return render_template("shop.html", miners=AVAILABLE_MINERS, owned=game.miners_owned, money=round(game.money, 2))
 
 
 @app.route("/buy", methods=["POST"])

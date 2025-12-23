@@ -8,7 +8,6 @@ from dataclasses import dataclass, field
 from typing import Any, ClassVar, Dict, List, Optional, Tuple
 
 from miners import AVAILABLE_MINERS
-
 from .coins import COINS, normalize_coin, reward_for_coin
 from .formatting import format_hashrate
 
@@ -17,47 +16,49 @@ from .formatting import format_hashrate
 class GameState:
     """Core game state and mining/economy mechanics."""
 
-    # Back-compat single-coin view fields (reflect active coin)
+    # -- Economy & Assets --
     money: float = 1000.0
-    crypto: float = 0.0
-    price: float = 50.0
-    difficulty: float = 1.0
-
+    crypto: float = 0.0  # Legacy view (active coin)
+    wallets: Dict[str, float] = field(default_factory=dict)
     miners_owned: Dict[str, int] = field(default_factory=dict)
-    hash_rate_cache: float = 0.0
 
-    # Telemetry
-    terminal_logs: List[str] = field(default_factory=list)
-    price_history: List[Tuple[float, float]] = field(default_factory=list)  # legacy active-coin view
+    # -- Market State --
+    price: float = 50.0  # Legacy view
+    difficulty: float = 1.0  # Legacy view
+    active_coin: str = "SHIB"
+    coin_prices: Dict[str, float] = field(default_factory=dict)
+    coin_difficulties: Dict[str, float] = field(default_factory=dict)
+    coin_network_targets: Dict[str, float] = field(default_factory=dict)
+
+    # -- Performance & Stats --
+    hash_rate_cache: float = 0.0
     blocks_found: int = 0
     shares_accepted: int = 0
     shares_rejected: int = 0
     started_at: float = field(default_factory=lambda: time.time())
     last_mine_ts: float = field(default_factory=lambda: time.time())
 
+    # -- Config & History --
+    block_find_multiplier: float = 1.0
+    reject_rate: float = 0.02
+    terminal_logs: List[str] = field(default_factory=list)
+    price_history: List[Tuple[float, float]] = field(default_factory=list)
+    price_history_by_coin: Dict[str, List[Tuple[float, float]]] = field(default_factory=dict)
+
+    # -- Constants --
+    COINS: ClassVar[Dict[str, Dict[str, Any]]] = COINS
+    SAVE_FILE: ClassVar[str] = "savegame.json"
     PRICE_HISTORY_SAMPLE_SEC: int = 60
     PRICE_HISTORY_MAX_POINTS: int = 720
     HASHRATE_JITTER_PCT: float = 0.01
 
-    # Mining config
-    block_find_multiplier: float = 1.0
-    reject_rate: float = 0.02
-
-    # Multi-coin mining
-    COINS: ClassVar[Dict[str, Dict[str, Any]]] = COINS
-    active_coin: str = "SHIB"
-    wallets: Dict[str, float] = field(default_factory=dict)
-    coin_prices: Dict[str, float] = field(default_factory=dict)
-    coin_difficulties: Dict[str, float] = field(default_factory=dict)
-    coin_network_targets: Dict[str, float] = field(default_factory=dict)
-    price_history_by_coin: Dict[str, List[Tuple[float, float]]] = field(default_factory=dict)
-
-    SAVE_FILE: ClassVar[str] = "savegame.json"
-
     def __post_init__(self) -> None:
+        """Initialize default values and migrate legacy save data."""
+        self.active_coin = normalize_coin(self.active_coin)
         if self.active_coin not in self.COINS:
             self.active_coin = "SHIB"
 
+        # Ensure all coins have entries
         for code, meta in self.COINS.items():
             self.wallets.setdefault(code, 0.0)
             self.coin_prices.setdefault(code, float(meta["base_price"]))
@@ -65,21 +66,24 @@ class GameState:
             self.coin_network_targets.setdefault(code, float(meta["network_target"]))
             self.price_history_by_coin.setdefault(code, [])
 
-        # Back-compat migration: if old saves only had crypto/price/difficulty.
-        if self.wallets.get(self.active_coin, 0.0) == 0.0 and self.crypto:
+        # Migration: Legacy single-coin save to multi-coin wallet
+        if self.wallets.get(self.active_coin, 0.0) == 0.0 and self.crypto > 0:
             self.wallets[self.active_coin] = float(self.crypto)
 
+        # Migration: Sync legacy price/diff if missing from dicts
         if self.active_coin not in self.coin_prices and self.price:
             self.coin_prices[self.active_coin] = float(self.price)
         if self.active_coin not in self.coin_difficulties and self.difficulty:
             self.coin_difficulties[self.active_coin] = float(self.difficulty)
 
+        # Migration: Sync history
         if self.price_history and not self.price_history_by_coin.get(self.active_coin):
             self.price_history_by_coin[self.active_coin] = list(self.price_history)
 
-        self._sync_active_view_from_coin_state()
+        self._sync_active_view()
 
-    def _sync_active_view_from_coin_state(self) -> None:
+    def _sync_active_view(self) -> None:
+        """Update legacy fields to reflect the currently active coin."""
         self.crypto = float(self.wallets.get(self.active_coin, 0.0))
         self.price = float(self.coin_prices.get(self.active_coin, self.price))
         self.difficulty = float(self.coin_difficulties.get(self.active_coin, self.difficulty))
@@ -90,19 +94,18 @@ class GameState:
             self.terminal_logs = self.terminal_logs[-400:]
 
     def recalc_hashrate(self) -> float:
-        total = 0.0
-        for spec in AVAILABLE_MINERS:
-            count = self.miners_owned.get(spec.key, 0)
-            total += count * spec.hashrate
-        self.hash_rate_cache = total
-        return total
+        """Calculate total hashrate from owned miners."""
+        self.hash_rate_cache = sum(
+            self.miners_owned.get(m.key, 0) * m.hashrate for m in AVAILABLE_MINERS
+        )
+        return self.hash_rate_cache
 
     def set_active_coin(self, coin: str | None) -> bool:
         coin = normalize_coin(coin)
         if coin not in self.COINS:
             return False
         self.active_coin = coin
-        self._sync_active_view_from_coin_state()
+        self._sync_active_view()
         self._log(f"[config] active coin set to {coin} ({self.COINS[coin]['symbol']})")
         return True
 
@@ -121,125 +124,164 @@ class GameState:
             nt = float(max(10_000.0, min(50_000_000.0, network_target)))
             self.coin_network_targets[self.active_coin] = nt
 
-    def solve_block(self, hashrate_hs: Optional[float] = None, *, dt_sec: float = 1.0) -> float:
-        if hashrate_hs is None:
-            hashrate_hs = self.recalc_hashrate()
-        if hashrate_hs <= 0:
+    def _calculate_reward(self, hashrate: float, dt: float) -> float:
+        """
+        Calculate reward based on hashrate (PPS - Pay Per Share model).
+
+        This provides a realistic 'pool mining' experience where reward
+        scales linearly with hashrate, rather than a lottery.
+        """
+        if hashrate <= 0:
             return 0.0
 
-        dt_sec = float(max(0.01, min(10.0, dt_sec)))
+        # 1. Determine Network Difficulty (Total Expected Hashes per Block)
+        #    We use the coin's network target scaled by the current difficulty multiplier.
+        base_target = self.coin_network_targets.get(
+            self.active_coin, self.COINS[self.active_coin]["network_target"]
+        )
+        network_difficulty_hashes = max(0.0001, self.difficulty) * max(1.0, base_target)
 
-        target = float(self.coin_network_targets.get(self.active_coin, self.COINS[self.active_coin]["network_target"]))
-        effective_hashes = hashrate_hs * dt_sec * max(0.0001, self.block_find_multiplier)
-        prob = min(1.0, effective_hashes / (max(0.0001, self.difficulty) * max(1.0, target)))
+        # 2. Calculate User's Contribution (Hashes Submitted)
+        #    Apply the 'block boost' multiplier here to speed up the game.
+        user_hashes = hashrate * dt * max(0.0001, self.block_find_multiplier)
 
-        if random.random() >= prob:
-            return 0.0
+        # 3. Calculate Share of the Block
+        share_fraction = user_hashes / network_difficulty_hashes
 
-        self.blocks_found += 1
-        return reward_for_coin(self.active_coin, self.difficulty)
+        # 4. Calculate Reward
+        block_reward = reward_for_coin(self.active_coin, self.difficulty)
+        reward = share_fraction * block_reward
 
-    def mine(self) -> float:
-        base_hashrate = self.recalc_hashrate()
-        jitter = 1.0 + random.uniform(-self.HASHRATE_JITTER_PCT, self.HASHRATE_JITTER_PCT)
-        hashrate_hs = max(0.0, base_hashrate * jitter)
-        up = int(time.time() - self.started_at)
-
-        now = time.time()
-        dt_sec = float(max(0.05, min(5.0, now - self.last_mine_ts)))
-        self.last_mine_ts = now
-
-        if base_hashrate <= 0:
-            self._log(f"[{up:>6}s] no active miners. buy rigs in Shop")
-            return 0.0
-
-        rejected = random.random() < self.reject_rate
-        if rejected:
-            self.shares_rejected += 1
-        else:
-            self.shares_accepted += 1
-
-        reward = 0.0
-        if not rejected:
-            reward = self.solve_block(hashrate_hs=hashrate_hs, dt_sec=dt_sec)
-
-        if reward > 0:
-            self.wallets[self.active_coin] = float(self.wallets.get(self.active_coin, 0.0)) + float(reward)
-            self.crypto = float(self.wallets[self.active_coin])
-            self._log(
-                f"[{up:>6}s] accepted (1/1) {self.active_coin} diff {self.difficulty:.3f} +{reward:.6f} (blocks={self.blocks_found})"
-            )
-        else:
-            status = "rejected" if rejected else "accepted"
-            self._log(
-                f"[{up:>6}s] {status:<8} {self.active_coin} speed {format_hashrate(hashrate_hs)}  diff {self.difficulty:.3f}  a/r {self.shares_accepted}/{self.shares_rejected}  boost x{self.block_find_multiplier:g}"
-            )
+        # 5. Simulate "Block Found" event for UI stats (Bernoulli trial)
+        #    Probability of finding a full block in this tick.
+        if random.random() < share_fraction:
+            self.blocks_found += 1
 
         return reward
 
-    def get_terminal_logs(self, last: int = 200) -> List[str]:
-        if last <= 0:
-            return []
-        return self.terminal_logs[-last:]
+    def mine(self) -> float:
+        """Perform one mining cycle."""
+        now = time.time()
+        dt = float(max(0.05, min(5.0, now - self.last_mine_ts)))
+        self.last_mine_ts = now
+        up_time = int(now - self.started_at)
 
-    def get_price_history(self, minutes: int = 60, *, coin: str | None = None) -> List[Dict[str, float]]:
-        coin_code = normalize_coin(coin) if coin else self.active_coin
-        if coin_code not in self.COINS:
-            coin_code = self.active_coin
-        cutoff = time.time() - max(1, minutes) * 60
-        hist = self.price_history_by_coin.get(coin_code, [])
-        points = [{"t": float(ts), "price": float(p)} for ts, p in hist if float(ts) >= cutoff]
-
-        # Keep the chart non-empty: if nothing is in-range, return the last known point.
-        if not points:
-            if hist:
-                ts, p = hist[-1]
-                return [{"t": float(ts), "price": float(p)}]
-
-            # No history yet for this coin: fall back to current coin price.
-            now = time.time()
-            current_price = float(self.coin_prices.get(coin_code, self.COINS[coin_code]["base_price"]))
-            return [{"t": float(now), "price": current_price}]
-
-        return points
-
-    def mining_tick(self) -> float:
         base_hashrate = self.recalc_hashrate()
-        reward = self.mine()
+        if base_hashrate <= 0:
+            if random.random() < 0.05:  # Don't spam logs
+                self._log(f"[{up_time:>6}s] no active miners. buy rigs in Shop")
+            return 0.0
 
-        # price drift (active coin)
+        # Add jitter to hashrate for realism
+        jitter = 1.0 + random.uniform(-self.HASHRATE_JITTER_PCT, self.HASHRATE_JITTER_PCT)
+        effective_hashrate = max(0.0, base_hashrate * jitter)
+
+        # Check for rejected shares (simulated hardware errors/network issues)
+        is_rejected = random.random() < self.reject_rate
+        if is_rejected:
+            self.shares_rejected += 1
+            self._log(
+                f"[{up_time:>6}s] rejected {self.active_coin} "
+                f"speed {format_hashrate(effective_hashrate)} "
+                f"diff {self.difficulty:.3f} a/r {self.shares_accepted}/{self.shares_rejected}"
+            )
+            return 0.0
+
+        self.shares_accepted += 1
+        reward = self._calculate_reward(effective_hashrate, dt)
+
+        if reward > 0:
+            current_bal = float(self.wallets.get(self.active_coin, 0.0))
+            self.wallets[self.active_coin] = current_bal + reward
+            self.crypto = self.wallets[self.active_coin]
+
+            # Only log significant rewards or periodically to avoid spamming PPS dust
+            if random.random() < 0.1:
+                self._log(
+                    f"[{up_time:>6}s] mining   {self.active_coin} "
+                    f"speed {format_hashrate(effective_hashrate)} "
+                    f"+{reward:.8f} (pool)"
+                )
+
+        return reward
+
+    def _update_market_economics(self, hashrate: float) -> None:
+        """Update coin prices and difficulty based on game loop."""
+        # Price Drift
         drift = random.uniform(-0.02, 0.02) * self.price
         self.price = max(0.00000001, self.price + drift)
         self.coin_prices[self.active_coin] = float(self.price)
 
-        # difficulty adapts for active coin (log-scaled so realistic H/s doesn't explode numbers)
+        # Difficulty Adjustment
+        # Scales logarithmically based on how much the user exceeds recommended hashrate
         base_diff = float(self.COINS[self.active_coin]["base_difficulty"])
-        rec = float(self.COINS[self.active_coin].get("recommended_hashrate", 1.0))
-        ratio = base_hashrate / max(1.0, rec)
+        rec_hashrate = float(self.COINS[self.active_coin].get("recommended_hashrate", 1.0))
+
+        ratio = hashrate / max(1.0, rec_hashrate)
+        # Logarithmic scaling: difficulty grows slower than hashrate
         self.difficulty = max(0.1, base_diff + math.log10(1.0 + max(0.0, ratio)))
         self.coin_difficulties[self.active_coin] = float(self.difficulty)
 
-        # sampled history per coin
+    def _record_price_history(self) -> None:
+        """Sample current price into history buffers."""
         now = time.time()
         hist = self.price_history_by_coin.setdefault(self.active_coin, [])
+
+        should_record = False
         if not hist:
+            should_record = True
+        elif now - float(hist[-1][0]) >= self.PRICE_HISTORY_SAMPLE_SEC:
+            should_record = True
+
+        if should_record:
             hist.append((now, self.price))
-        else:
-            last_ts = float(hist[-1][0])
-            if now - last_ts >= self.PRICE_HISTORY_SAMPLE_SEC:
-                hist.append((now, self.price))
+            if len(hist) > self.PRICE_HISTORY_MAX_POINTS:
+                self.price_history_by_coin[self.active_coin] = hist[
+                    -self.PRICE_HISTORY_MAX_POINTS :
+                ]
 
-        if len(hist) > self.PRICE_HISTORY_MAX_POINTS:
-            self.price_history_by_coin[self.active_coin] = hist[-self.PRICE_HISTORY_MAX_POINTS :]
+            # Sync legacy view
+            self.price_history = self.price_history_by_coin[self.active_coin]
 
-        # keep legacy view in sync
-        self.price_history = self.price_history_by_coin.get(self.active_coin, [])
+    def mining_tick(self) -> float:
+        """Main game loop tick: mine, update economy, record stats."""
+        reward = self.mine()
+        self._update_market_economics(self.hash_rate_cache)
+        self._record_price_history()
         return reward
+
+    def get_terminal_logs(self, last: int = 200) -> List[str]:
+        return self.terminal_logs[-last:] if last > 0 else []
+
+    def get_price_history(
+        self, minutes: int = 60, *, coin: str | None = None
+    ) -> List[Dict[str, float]]:
+        coin_code = normalize_coin(coin) if coin else self.active_coin
+        if coin_code not in self.COINS:
+            coin_code = self.active_coin
+
+        cutoff = time.time() - max(1, minutes) * 60
+        hist = self.price_history_by_coin.get(coin_code, [])
+
+        points = [
+            {"t": float(ts), "price": float(p)} for ts, p in hist if float(ts) >= cutoff
+        ]
+
+        if not points:
+            # Fallback to current state if history is empty/out of range
+            now = time.time()
+            current_p = float(
+                self.coin_prices.get(coin_code, self.COINS[coin_code]["base_price"])
+            )
+            return [{"t": float(now), "price": current_p}]
+
+        return points
 
     def buy_miner(self, miner_key: str) -> bool:
         spec = next((m for m in AVAILABLE_MINERS if m.key == miner_key), None)
-        if spec is None:
+        if not spec:
             return False
+
         if self.money >= spec.cost:
             self.money -= spec.cost
             self.miners_owned[miner_key] = self.miners_owned.get(miner_key, 0) + 1
@@ -250,6 +292,7 @@ class GameState:
     def buy_upgrade(self, upgrade_id: str) -> bool:
         if upgrade_id == "efficiency_boost" and self.money >= 500:
             self.money -= 500
+            # Permanent difficulty reduction for active coin
             self.difficulty = max(0.1, self.difficulty - 0.1)
             self.coin_difficulties[self.active_coin] = float(self.difficulty)
             return True
@@ -259,8 +302,9 @@ class GameState:
         bal = float(self.wallets.get(self.active_coin, 0.0))
         if amount <= 0 or amount > bal:
             return False
+
         self.wallets[self.active_coin] = bal - float(amount)
-        self.crypto = float(self.wallets[self.active_coin])
+        self.crypto = self.wallets[self.active_coin]
         self.money += float(amount) * float(self.price)
         return True
 
@@ -272,7 +316,7 @@ class GameState:
             "difficulty": self.difficulty,
             "miners_owned": self.miners_owned,
             "terminal_logs": self.terminal_logs,
-            "price_history": self.price_history[-self.PRICE_HISTORY_MAX_POINTS :],
+            "price_history": self.price_history,
             "blocks_found": self.blocks_found,
             "shares_accepted": self.shares_accepted,
             "shares_rejected": self.shares_rejected,
@@ -284,10 +328,9 @@ class GameState:
             "coin_prices": self.coin_prices,
             "coin_difficulties": self.coin_difficulties,
             "coin_network_targets": self.coin_network_targets,
-            "price_history_by_coin": {
-                k: v[-self.PRICE_HISTORY_MAX_POINTS :] for k, v in self.price_history_by_coin.items()
-            },
+            "price_history_by_coin": self.price_history_by_coin,
         }
+        # Use a temp file or just write directly (simple game)
         with open(self.SAVE_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
 
@@ -297,44 +340,33 @@ class GameState:
             with open(cls.SAVE_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
-            gs = cls(
-                money=data.get("money", 1000.0),
-                crypto=data.get("crypto", 0.0),
-                price=data.get("price", 50.0),
-                difficulty=data.get("difficulty", 1.0),
-                miners_owned=data.get("miners_owned", {}),
-                terminal_logs=data.get("terminal_logs", []),
-                price_history=data.get("price_history", []),
-                blocks_found=data.get("blocks_found", 0),
-                shares_accepted=data.get("shares_accepted", 0),
-                shares_rejected=data.get("shares_rejected", 0),
-                started_at=data.get("started_at", time.time()),
-                block_find_multiplier=data.get("block_find_multiplier", 1.0),
-                reject_rate=data.get("reject_rate", 0.02),
-                active_coin=data.get("active_coin", "SHIB"),
-                wallets=data.get("wallets", {}),
-                coin_prices=data.get("coin_prices", {}),
-                coin_difficulties=data.get("coin_difficulties", {}),
-                coin_network_targets=data.get("coin_network_targets", {}),
-                price_history_by_coin=data.get("price_history_by_coin", {}),
-            )
+            # Filter out keys that don't belong to the dataclass fields
+            # to avoid TypeError on init if save file has stale keys
+            valid_keys = cls.__dataclass_fields__.keys()
+            filtered_data = {k: v for k, v in data.items() if k in valid_keys}
 
-            # prune oversized histories
-            for coin, hist in list(gs.price_history_by_coin.items()):
-                if len(hist) > gs.PRICE_HISTORY_MAX_POINTS:
-                    gs.price_history_by_coin[coin] = hist[-gs.PRICE_HISTORY_MAX_POINTS :]
-            if len(gs.price_history) > gs.PRICE_HISTORY_MAX_POINTS:
-                gs.price_history = gs.price_history[-gs.PRICE_HISTORY_MAX_POINTS :]
-
-            gs._sync_active_view_from_coin_state()
+            gs = cls(**filtered_data)
+            gs.__post_init__()  # Re-run post init to ensure migrations/sync
             gs.recalc_hashrate()
             return gs
-        except FileNotFoundError:
+        except (FileNotFoundError, json.JSONDecodeError):
             return cls()
 
     def reset(self) -> None:
         self.money = 10000.0
         self.active_coin = "SHIB"
+        self.miners_owned.clear()
+        self.hash_rate_cache = 0.0
+        self.terminal_logs.clear()
+        self.price_history.clear()
+        self.blocks_found = 0
+        self.shares_accepted = 0
+        self.shares_rejected = 0
+        self.started_at = time.time()
+        self.block_find_multiplier = 1.0
+        self.reject_rate = 0.02
+
+        # Reset coin states
         for coin, meta in self.COINS.items():
             self.wallets[coin] = 0.0
             self.coin_prices[coin] = float(meta["base_price"])
@@ -342,16 +374,4 @@ class GameState:
             self.coin_network_targets[coin] = float(meta["network_target"])
             self.price_history_by_coin[coin] = []
 
-        self._sync_active_view_from_coin_state()
-        self.miners_owned = {}
-        self.hash_rate_cache = 0.0
-
-        self.terminal_logs = []
-        self.price_history = []
-        self.blocks_found = 0
-        self.shares_accepted = 0
-        self.shares_rejected = 0
-        self.started_at = time.time()
-
-        self.block_find_multiplier = 1.0
-        self.reject_rate = 0.02
+        self._sync_active_view()

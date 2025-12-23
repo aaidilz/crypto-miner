@@ -59,7 +59,7 @@ AVAILABLE_MINERS: List[MinerSpec] = [
     MinerSpec(
         key="asic_farm",
         name="ASIC Farm (Rack)",
-        cost=260_000.0,
+        cost=260.0,
         hashrate=180_000_000_000_000.0,  # 180 TH/s
         description="Rack of ASICs. Extreme hashrate.",
     ),
