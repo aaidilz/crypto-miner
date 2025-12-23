@@ -16,6 +16,18 @@
 
         <div class="row" style="margin-top:10px;">
           <div>
+            <label>Coin to mine</label><br>
+            <select id="coinSelect">
+              {% for code, meta in coins.items() %}
+                <option value="{{ code }}" {% if code == active_coin %}selected{% endif %}>{{ meta.symbol }} ({{ code }})</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="muted" id="coinHint" style="margin-top:18px;"></div>
+        </div>
+
+        <div class="row" style="margin-top:10px;">
+          <div>
             <label>Refresh rate</label><br>
             <select id="tickMs">
               <option value="250">250 ms</option>
@@ -67,6 +79,9 @@
           <form method="post" action="/save" class="row" style="margin:0;">
             <button type="submit" class="secondary">Save</button>
           </form>
+          <form method="post" action="/reset" class="row" style="margin:0;" onsubmit="return confirm('Reset game? This will overwrite savegame.json.');">
+            <button type="submit" class="danger">Reset Game</button>
+          </form>
         </div>
 
         <div style="display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 12px;">
@@ -77,6 +92,7 @@
           <div class="card" style="padding:10px;">
             <div class="muted">Wallet (coins)</div>
             <div style="font-size:16px; font-weight:700;" id="vCrypto">{{ crypto }}</div>
+            <div class="muted" style="margin-top:4px;" id="vCoin">{{ active_coin }}</div>
           </div>
           <div class="card" style="padding:10px;">
             <div class="muted">Price</div>
@@ -109,6 +125,19 @@
           </div>
           <button type="submit">Sell</button>
         </form>
+      </div>
+
+      <div class="card">
+        <h3 style="margin:0 0 8px 0; font-size:14px;">Wallet Balances</h3>
+        <div class="muted" style="margin-bottom:8px;">Balances for all coins (selling uses active coin).</div>
+        <div style="display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px;">
+          {% for code, meta in coins.items() %}
+            <div class="card" style="padding:10px;">
+              <div class="muted">{{ meta.symbol }} ({{ code }})</div>
+              <div style="font-size:14px; font-weight:700;" id="bal_{{ code }}">{{ (wallets.get(code, 0.0) or 0.0) | round(6) }}</div>
+            </div>
+          {% endfor %}
+        </div>
       </div>
 
       <div class="card">
@@ -159,6 +188,10 @@
     const vDiff = document.getElementById('vDiff');
     const vHR = document.getElementById('vHR');
     const vShares = document.getElementById('vShares');
+    const vCoin = document.getElementById('vCoin');
+
+    const coinSelect = document.getElementById('coinSelect');
+    const coinHint = document.getElementById('coinHint');
 
     const tickMsSel = document.getElementById('tickMs');
     const chartMinutesSel = document.getElementById('chartMinutes');
@@ -200,6 +233,18 @@
       vHR.textContent = `${s.hashrate.toFixed(2)} H/s`;
       vShares.textContent = `${s.blocks_found} / ${s.shares_accepted}/${s.shares_rejected}`;
 
+      if (payload.active_coin) {
+        vCoin.textContent = payload.active_coin;
+        coinSelect.value = payload.active_coin;
+      }
+
+      if (payload.wallets) {
+        for (const [code, bal] of Object.entries(payload.wallets)) {
+          const el = document.getElementById(`bal_${code}`);
+          if (el) el.textContent = Number(bal).toFixed(6);
+        }
+      }
+
       if (payload.logs && payload.logs.length) appendLines(payload.logs);
     }
 
@@ -219,6 +264,38 @@
       const cfg = await res.json();
       if (cfg.block_find_multiplier != null) blockBoostSel.value = String(cfg.block_find_multiplier);
       if (cfg.reject_rate != null) rejectRateSel.value = String(cfg.reject_rate);
+    }
+
+    async function switchCoin() {
+      const coin = coinSelect.value;
+      await fetch('/api/coin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ coin })
+      });
+      clearTerminal();
+      await refreshChart();
+      // pull latest state snapshot
+      const res = await fetch('/api/state');
+      if (!res.ok) return;
+      const s = await res.json();
+      vMoney.textContent = `$${Number(s.money).toFixed(2)}`;
+      vCrypto.textContent = Number(s.crypto).toFixed(6);
+      vPrice.textContent = `$${Number(s.price).toFixed(4)}`;
+      vDiff.textContent = Number(s.difficulty).toFixed(4);
+      vHR.textContent = `${Number(s.hashrate).toFixed(2)} H/s`;
+      vShares.textContent = `${s.blocks_found} / ${s.shares_accepted}/${s.shares_rejected}`;
+      vCoin.textContent = s.active_coin;
+      if (s.coins && s.coins[s.active_coin]) {
+        const meta = s.coins[s.active_coin];
+        coinHint.textContent = `Recommended hashrate: ${Number(meta.recommended_hashrate).toFixed(0)} H/s · ${meta.name}`;
+      }
+      if (s.wallets) {
+        for (const [code, bal] of Object.entries(s.wallets)) {
+          const el = document.getElementById(`bal_${code}`);
+          if (el) el.textContent = Number(bal).toFixed(6);
+        }
+      }
     }
 
     // Chart
@@ -249,7 +326,8 @@
 
     async function refreshChart() {
       const minutes = parseInt(chartMinutesSel.value, 10);
-      const res = await fetch(`/api/price_history?minutes=${minutes}`);
+      const coin = coinSelect.value;
+      const res = await fetch(`/api/price_history?minutes=${minutes}&coin=${encodeURIComponent(coin)}`);
       if (!res.ok) return;
       const payload = await res.json();
       const hist = payload.history || [];
@@ -286,11 +364,22 @@
     chartMsSel.addEventListener('change', startChartTimer);
     blockBoostSel.addEventListener('change', pushConfig);
     rejectRateSel.addEventListener('change', pushConfig);
+    coinSelect.addEventListener('change', switchCoin);
 
     // init
     setRunning(false);
     startChartTimer();
     pullConfig();
+    // initial hint
+    (async () => {
+      const res = await fetch('/api/state');
+      if (!res.ok) return;
+      const s = await res.json();
+      if (s.coins && s.coins[s.active_coin]) {
+        const meta = s.coins[s.active_coin];
+        coinHint.textContent = `Recommended hashrate: ${Number(meta.recommended_hashrate).toFixed(0)} H/s · ${meta.name}`;
+      }
+    })();
 
     // warm terminal with last logs (if any)
     (async () => {

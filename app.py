@@ -29,6 +29,9 @@ def dashboard():
         blocks_found=game.blocks_found,
         shares_accepted=game.shares_accepted,
         shares_rejected=game.shares_rejected,
+        active_coin=game.active_coin,
+        coins=GameState.COINS,
+        wallets=game.wallets,
     )
 
 
@@ -45,6 +48,9 @@ def api_state():
             "blocks_found": game.blocks_found,
             "shares_accepted": game.shares_accepted,
             "shares_rejected": game.shares_rejected,
+            "active_coin": game.active_coin,
+            "wallets": game.wallets,
+            "coins": GameState.COINS,
             "mining_config": {
                 "network_target": game.network_target,
                 "block_find_multiplier": game.block_find_multiplier,
@@ -52,6 +58,16 @@ def api_state():
             },
         }
     )
+
+
+@app.route("/api/coin", methods=["POST"])
+def api_coin():
+    payload = request.get_json(silent=True) or {}
+    coin = payload.get("coin")
+    ok = game.set_active_coin(coin)
+    if ok:
+        game.save()
+    return jsonify({"ok": ok, "active_coin": game.active_coin})
 
 
 @app.route("/api/config", methods=["GET", "POST"])
@@ -86,12 +102,14 @@ def api_config():
 def api_mine_tick():
     # One mining tick (used by auto-miner UI)
     before_logs = len(game.terminal_logs)
-    game.mining_tick()
+    reward = game.mining_tick()
     game.save()
     new_logs = game.terminal_logs[before_logs:]
     return jsonify(
         {
-            "reward": 0,  # reward is already reflected in crypto; kept for compatibility
+            "reward": reward,
+            "active_coin": game.active_coin,
+            "wallets": game.wallets,
             "state": {
                 "money": round(game.money, 2),
                 "crypto": round(game.crypto, 6),
@@ -122,7 +140,8 @@ def api_price_history():
         minutes = int(request.args.get("minutes", "60"))
     except ValueError:
         minutes = 60
-    return jsonify({"history": game.get_price_history(minutes=minutes)})
+    coin = request.args.get("coin")
+    return jsonify({"history": game.get_price_history(minutes=minutes, coin=coin), "active_coin": game.active_coin})
 
 
 @app.route("/mine", methods=["POST"])
@@ -206,6 +225,15 @@ def save():
     """Endpoint to force a save from the UI."""
     game.save()
     flash("Game saved.")
+    return redirect(url_for("dashboard"))
+
+
+@app.route("/reset", methods=["POST"])
+def reset_game():
+    """Reset game progress to defaults and overwrite savegame.json."""
+    game.reset()
+    game.save()
+    flash("Game reset to defaults.")
     return redirect(url_for("dashboard"))
 
 
