@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <h2>Status</h2>
+    <p><strong>Money:</strong> ${{ money }}</p>
+    <p><strong>Crypto:</strong> {{ crypto }}</p>
+    <p><strong>Price:</strong> ${{ price }} per coin</p>
+    <p><strong>Difficulty:</strong> {{ difficulty }}</p>
+    <p><strong>Hashrate:</strong> {{ hashrate }}</p>
+    <form method="post" action="/mine">
+      <button type="submit">Mine (1 tick)</button>
+    </form>
+    <form method="post" action="/save" style="margin-top:8px;">
+      <button type="submit">Save Game</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h3>Sell Crypto</h3>
+    <form method="post" action="/sell">
+      <label>Amount: <input name="amount" value="0.1"></label>
+      <button type="submit">Sell</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h3>Owned Miners</h3>
+    {% if miners_owned %}
+      <ul>
+        {% for key, count in miners_owned.items() %}
+          <li>{{ key }}: {{ count }}</li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p>No miners owned yet.</p>
+    {% endif %}
+  </div>
+{% endblock %}

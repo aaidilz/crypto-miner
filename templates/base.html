@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Crypto Mining Tycoon</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 16px; max-width:900px; }
+      nav a { margin-right: 12px; }
+      .card { border: 1px solid #ddd; padding: 12px; margin: 8px 0; }
+      .inline-form { display:inline-block; margin-left:8px; }
+      .flash { background:#ffd; padding:8px; border:1px solid #ccc; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Crypto Mining Tycoon</h1>
+      <nav>
+        <a href="/">Dashboard</a>
+        <a href="/shop">Shop</a>
+        <a href="/upgrades">Upgrades</a>
+      </nav>
+    </header>
+
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}
+        <div class="flash">
+          {% for m in messages %}
+            <div>{{ m }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+  </body>
+</html>

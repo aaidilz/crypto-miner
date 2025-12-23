@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <h2>Shop</h2>
+    <p>Buy miners to increase your hashrate.</p>
+    <ul>
+      {% for m in miners %}
+        <li>
+          <strong>{{ m.name }}</strong> — ${{ m.cost }} — Hashrate: {{ m.hashrate }}
+          <div>{{ m.description }}</div>
+          <form method="post" action="/buy" class="inline-form">
+            <input type="hidden" name="miner_key" value="{{ m.key }}">
+            <button type="submit">Buy</button>
+          </form>
+          <span style="margin-left:10px;">Owned: {{ owned.get(m.key, 0) }}</span>
+        </li>
+      {% endfor %}
+    </ul>
+  </div>
+{% endblock %}

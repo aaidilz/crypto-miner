@@ -1,0 +1,10 @@
+{
+  "money": 1291.463885356753,
+  "crypto": 0.707763576252459,
+  "price": 45.81432398755679,
+  "difficulty": 1.06,
+  "miners_owned": {
+    "asic_medium": 3,
+    "asic_small": 2
+  }
+}

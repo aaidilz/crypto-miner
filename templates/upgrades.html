@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card">
+    <h2>Upgrades</h2>
+    <p>Simple upgrades to affect difficulty/efficiency.</p>
+    <div>
+      <strong>Efficiency Boost</strong> — $500
+      <form method="post" action="/buy_upgrade" class="inline-form">
+        <input type="hidden" name="upgrade_id" value="efficiency_boost">
+        <button type="submit">Buy</button>
+      </form>
+    </div>
+  </div>
+{% endblock %}
