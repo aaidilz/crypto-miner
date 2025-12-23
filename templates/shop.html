@@ -6,7 +6,7 @@
     <ul>
       {% for m in miners %}
         <li>
-          <strong>{{ m.name }}</strong> — ${{ m.cost }} — Hashrate: {{ m.hashrate }}
+          <strong>{{ m.name }}</strong> — ${{ m.cost }} — Hashrate: {{ m.hashrate | format_hashrate }}
           <div>{{ m.description }}</div>
           <form method="post" action="/buy" class="inline-form">
             <input type="hidden" name="miner_key" value="{{ m.key }}">

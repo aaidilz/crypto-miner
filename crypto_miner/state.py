@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import random
 import time
 from dataclasses import dataclass, field
@@ -9,6 +10,7 @@ from typing import Any, ClassVar, Dict, List, Optional, Tuple
 from miners import AVAILABLE_MINERS
 
 from .coins import COINS, normalize_coin, reward_for_coin
+from .formatting import format_hashrate
 
 
 @dataclass
@@ -31,6 +33,7 @@ class GameState:
     shares_accepted: int = 0
     shares_rejected: int = 0
     started_at: float = field(default_factory=lambda: time.time())
+    last_mine_ts: float = field(default_factory=lambda: time.time())
 
     PRICE_HISTORY_SAMPLE_SEC: int = 60
     PRICE_HISTORY_MAX_POINTS: int = 720
@@ -118,15 +121,17 @@ class GameState:
             nt = float(max(10_000.0, min(50_000_000.0, network_target)))
             self.coin_network_targets[self.active_coin] = nt
 
-    def solve_block(self, hashrate: Optional[float] = None) -> float:
-        if hashrate is None:
-            hashrate = self.recalc_hashrate()
-        if hashrate <= 0:
+    def solve_block(self, hashrate_hs: Optional[float] = None, *, dt_sec: float = 1.0) -> float:
+        if hashrate_hs is None:
+            hashrate_hs = self.recalc_hashrate()
+        if hashrate_hs <= 0:
             return 0.0
 
+        dt_sec = float(max(0.01, min(10.0, dt_sec)))
+
         target = float(self.coin_network_targets.get(self.active_coin, self.COINS[self.active_coin]["network_target"]))
-        effective_hashrate = hashrate * max(0.0001, self.block_find_multiplier)
-        prob = min(1.0, effective_hashrate / (max(0.0001, self.difficulty) * max(1.0, target)))
+        effective_hashes = hashrate_hs * dt_sec * max(0.0001, self.block_find_multiplier)
+        prob = min(1.0, effective_hashes / (max(0.0001, self.difficulty) * max(1.0, target)))
 
         if random.random() >= prob:
             return 0.0
@@ -137,8 +142,12 @@ class GameState:
     def mine(self) -> float:
         base_hashrate = self.recalc_hashrate()
         jitter = 1.0 + random.uniform(-self.HASHRATE_JITTER_PCT, self.HASHRATE_JITTER_PCT)
-        hashrate = max(0.0, base_hashrate * jitter)
+        hashrate_hs = max(0.0, base_hashrate * jitter)
         up = int(time.time() - self.started_at)
+
+        now = time.time()
+        dt_sec = float(max(0.05, min(5.0, now - self.last_mine_ts)))
+        self.last_mine_ts = now
 
         if base_hashrate <= 0:
             self._log(f"[{up:>6}s] no active miners. buy rigs in Shop")
@@ -152,7 +161,7 @@ class GameState:
 
         reward = 0.0
         if not rejected:
-            reward = self.solve_block(hashrate=hashrate)
+            reward = self.solve_block(hashrate_hs=hashrate_hs, dt_sec=dt_sec)
 
         if reward > 0:
             self.wallets[self.active_coin] = float(self.wallets.get(self.active_coin, 0.0)) + float(reward)
@@ -163,7 +172,7 @@ class GameState:
         else:
             status = "rejected" if rejected else "accepted"
             self._log(
-                f"[{up:>6}s] {status:<8} {self.active_coin} speed 10s {hashrate:,.2f}H/s  diff {self.difficulty:.3f}  a/r {self.shares_accepted}/{self.shares_rejected}  boost x{self.block_find_multiplier:g}"
+                f"[{up:>6}s] {status:<8} {self.active_coin} speed {format_hashrate(hashrate_hs)}  diff {self.difficulty:.3f}  a/r {self.shares_accepted}/{self.shares_rejected}  boost x{self.block_find_multiplier:g}"
             )
 
         return reward
@@ -179,7 +188,20 @@ class GameState:
             coin_code = self.active_coin
         cutoff = time.time() - max(1, minutes) * 60
         hist = self.price_history_by_coin.get(coin_code, [])
-        return [{"t": float(ts), "price": float(p)} for ts, p in hist if ts >= cutoff]
+        points = [{"t": float(ts), "price": float(p)} for ts, p in hist if float(ts) >= cutoff]
+
+        # Keep the chart non-empty: if nothing is in-range, return the last known point.
+        if not points:
+            if hist:
+                ts, p = hist[-1]
+                return [{"t": float(ts), "price": float(p)}]
+
+            # No history yet for this coin: fall back to current coin price.
+            now = time.time()
+            current_price = float(self.coin_prices.get(coin_code, self.COINS[coin_code]["base_price"]))
+            return [{"t": float(now), "price": current_price}]
+
+        return points
 
     def mining_tick(self) -> float:
         base_hashrate = self.recalc_hashrate()
@@ -190,9 +212,11 @@ class GameState:
         self.price = max(0.00000001, self.price + drift)
         self.coin_prices[self.active_coin] = float(self.price)
 
-        # difficulty adapts for active coin
+        # difficulty adapts for active coin (log-scaled so realistic H/s doesn't explode numbers)
         base_diff = float(self.COINS[self.active_coin]["base_difficulty"])
-        self.difficulty = max(0.1, base_diff + base_hashrate / 1000.0)
+        rec = float(self.COINS[self.active_coin].get("recommended_hashrate", 1.0))
+        ratio = base_hashrate / max(1.0, rec)
+        self.difficulty = max(0.1, base_diff + math.log10(1.0 + max(0.0, ratio)))
         self.coin_difficulties[self.active_coin] = float(self.difficulty)
 
         # sampled history per coin

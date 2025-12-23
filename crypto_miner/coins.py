@@ -11,8 +11,10 @@ COINS: Dict[str, Dict[str, Any]] = {
         "symbol": "$SHIB",
         "base_price": 0.00002,
         "base_difficulty": 0.35,
-        "network_target": 120_000.0,
-        "recommended_hashrate": 250.0,
+        # network_target is "expected hashes per block" at difficulty=1.
+        # With dt-aware mining, this keeps block finds roughly in a sane range.
+        "network_target": 120_000_000.0,
+        "recommended_hashrate": 200_000.0,
         "reward_tiers": [
             (0.50, 5_000_000.0),
             (1.25, 2_500_000.0),
@@ -25,8 +27,8 @@ COINS: Dict[str, Dict[str, Any]] = {
         "symbol": "$DOGE",
         "base_price": 0.12,
         "base_difficulty": 1.25,
-        "network_target": 650_000.0,
-        "recommended_hashrate": 2_500.0,
+        "network_target": 3_000_000_000.0,
+        "recommended_hashrate": 5_000_000.0,
         "reward_tiers": [
             (1.25, 5.0),
             (3.00, 2.0),
@@ -39,8 +41,8 @@ COINS: Dict[str, Dict[str, Any]] = {
         "symbol": "$XMR",
         "base_price": 180.0,
         "base_difficulty": 2.25,
-        "network_target": 1_600_000.0,
-        "recommended_hashrate": 8_000.0,
+        "network_target": 180_000_000.0,
+        "recommended_hashrate": 300_000.0,
         "reward_tiers": [
             (2.00, 0.02),
             (4.00, 0.01),
@@ -53,8 +55,8 @@ COINS: Dict[str, Dict[str, Any]] = {
         "symbol": "$ETH",
         "base_price": 3200.0,
         "base_difficulty": 3.25,
-        "network_target": 2_500_000.0,
-        "recommended_hashrate": 15_000.0,
+        "network_target": 60_000_000_000.0,
+        "recommended_hashrate": 100_000_000.0,
         "reward_tiers": [
             (3.00, 0.01),
             (6.00, 0.005),
@@ -67,8 +69,8 @@ COINS: Dict[str, Dict[str, Any]] = {
         "symbol": "$BTC",
         "base_price": 60000.0,
         "base_difficulty": 5.0,
-        "network_target": 4_000_000.0,
-        "recommended_hashrate": 40_000.0,
+        "network_target": 6_000_000_000_000_000.0,
+        "recommended_hashrate": 10_000_000_000_000.0,
         "reward_tiers": [
             (5.00, 0.0010),
             (10.0, 0.0005),

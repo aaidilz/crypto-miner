@@ -104,7 +104,7 @@
           </div>
           <div class="card" style="padding:10px;">
             <div class="muted">Hashrate</div>
-            <div style="font-size:16px; font-weight:700;" id="vHR">{{ hashrate }} H/s</div>
+            <div style="font-size:16px; font-weight:700;" id="vHR">{{ hashrate | format_hashrate }}</div>
           </div>
           <div class="card" style="padding:10px;">
             <div class="muted">Blocks / Shares</div>
@@ -121,7 +121,13 @@
         <form method="post" action="/sell" class="row" style="margin-top:10px;">
           <div>
             <label>Amount</label><br>
-            <input name="amount" value="0.1" style="width:140px;">
+            <input id="sellAmount" name="amount" value="0.1" style="width:140px;">
+          </div>
+          <div class="row" style="gap:6px;">
+            <button type="button" class="secondary" data-sell-pct="0.25">25%</button>
+            <button type="button" class="secondary" data-sell-pct="0.50">50%</button>
+            <button type="button" class="secondary" data-sell-pct="0.75">75%</button>
+            <button type="button" class="secondary" data-sell-pct="1.00">100%</button>
           </div>
           <button type="submit">Sell</button>
         </form>
@@ -189,6 +195,7 @@
     const vHR = document.getElementById('vHR');
     const vShares = document.getElementById('vShares');
     const vCoin = document.getElementById('vCoin');
+    const sellAmountEl = document.getElementById('sellAmount');
 
     const coinSelect = document.getElementById('coinSelect');
     const coinHint = document.getElementById('coinHint');
@@ -201,6 +208,18 @@
 
     let minerTimer = null;
     let chartTimer = null;
+
+    function formatHashrate(hs) {
+      let v = Number(hs);
+      if (!Number.isFinite(v) || v < 0) v = 0;
+      const units = ['H/s', 'kH/s', 'MH/s', 'GH/s', 'TH/s', 'PH/s', 'EH/s'];
+      let u = 0;
+      while (v >= 1000 && u < units.length - 1) {
+        v /= 1000;
+        u += 1;
+      }
+      return `${v.toFixed(2)} ${units[u]}`;
+    }
 
     function appendLines(lines) {
       for (const line of lines) {
@@ -230,7 +249,7 @@
       vCrypto.textContent = s.crypto.toFixed(6);
       vPrice.textContent = `$${s.price.toFixed(4)}`;
       vDiff.textContent = s.difficulty.toFixed(4);
-      vHR.textContent = `${s.hashrate.toFixed(2)} H/s`;
+      vHR.textContent = formatHashrate(s.hashrate);
       vShares.textContent = `${s.blocks_found} / ${s.shares_accepted}/${s.shares_rejected}`;
 
       if (payload.active_coin) {
@@ -283,7 +302,7 @@
       vCrypto.textContent = Number(s.crypto).toFixed(6);
       vPrice.textContent = `$${Number(s.price).toFixed(4)}`;
       vDiff.textContent = Number(s.difficulty).toFixed(4);
-      vHR.textContent = `${Number(s.hashrate).toFixed(2)} H/s`;
+      vHR.textContent = formatHashrate(s.hashrate);
       vShares.textContent = `${s.blocks_found} / ${s.shares_accepted}/${s.shares_rejected}`;
       vCoin.textContent = s.active_coin;
       if (s.coins && s.coins[s.active_coin]) {
@@ -331,9 +350,33 @@
       if (!res.ok) return;
       const payload = await res.json();
       const hist = payload.history || [];
+
+      // Don't blank the chart on transient empty/edge cases.
+      if (!hist.length) {
+        return;
+      }
+
       priceChart.data.labels = hist.map(p => new Date(p.t * 1000).toLocaleTimeString());
       priceChart.data.datasets[0].data = hist.map(p => p.price);
       priceChart.update();
+    }
+
+    function getActiveCoinCode() {
+      return (coinSelect && coinSelect.value) ? coinSelect.value : (vCoin.textContent || '').trim();
+    }
+
+    function getActiveBalance() {
+      const code = getActiveCoinCode();
+      const balEl = document.getElementById(`bal_${code}`);
+      const raw = balEl ? balEl.textContent : '0';
+      const v = Number(String(raw).replace(/,/g, ''));
+      return Number.isFinite(v) ? v : 0;
+    }
+
+    function setSellPercent(pct) {
+      const bal = getActiveBalance();
+      const amt = Math.max(0, bal * pct);
+      if (sellAmountEl) sellAmountEl.value = amt.toFixed(6);
     }
 
     function startChartTimer() {
@@ -365,6 +408,14 @@
     blockBoostSel.addEventListener('change', pushConfig);
     rejectRateSel.addEventListener('change', pushConfig);
     coinSelect.addEventListener('change', switchCoin);
+
+    // Sell % buttons
+    document.querySelectorAll('button[data-sell-pct]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const pct = Number(btn.getAttribute('data-sell-pct'));
+        if (Number.isFinite(pct)) setSellPercent(pct);
+      });
+    });
 
     // init
     setRunning(false);

@@ -1,12 +1,18 @@
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
 from game_state import GameState
 from miners import AVAILABLE_MINERS
+from crypto_miner.formatting import format_hashrate
 
 # Minimal Flask application that exposes the CLI mechanics via web pages.
 # Comments below explain the mapping between routes and the old CLI commands.
 
 app = Flask(__name__)
 app.secret_key = "dev-key-for-flask-session"
+
+
+@app.template_filter("format_hashrate")
+def _format_hashrate(value):
+    return format_hashrate(value)
 
 # Load or create game state once at startup. For simplicity we keep it in memory.
 game = GameState.load()
@@ -24,7 +30,7 @@ def dashboard():
         crypto=round(game.crypto, 6),
         price=round(game.price, 2),
         difficulty=round(game.difficulty, 3),
-        hashrate=round(game.recalc_hashrate(), 2),
+        hashrate=game.recalc_hashrate(),
         miners_owned=game.miners_owned,
         blocks_found=game.blocks_found,
         shares_accepted=game.shares_accepted,
@@ -43,7 +49,7 @@ def api_state():
             "crypto": round(game.crypto, 6),
             "price": round(game.price, 4),
             "difficulty": round(game.difficulty, 4),
-            "hashrate": round(game.recalc_hashrate(), 2),
+            "hashrate": game.recalc_hashrate(),
             "miners_owned": game.miners_owned,
             "blocks_found": game.blocks_found,
             "shares_accepted": game.shares_accepted,
@@ -115,7 +121,7 @@ def api_mine_tick():
                 "crypto": round(game.crypto, 6),
                 "price": round(game.price, 4),
                 "difficulty": round(game.difficulty, 4),
-                "hashrate": round(game.recalc_hashrate(), 2),
+                "hashrate": game.recalc_hashrate(),
                 "blocks_found": game.blocks_found,
                 "shares_accepted": game.shares_accepted,
                 "shares_rejected": game.shares_rejected,
