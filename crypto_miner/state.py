@@ -29,6 +29,7 @@ class GameState:
     coin_prices: Dict[str, float] = field(default_factory=dict)
     coin_difficulties: Dict[str, float] = field(default_factory=dict)
     coin_network_targets: Dict[str, float] = field(default_factory=dict)
+    coin_competition: Dict[str, float] = field(default_factory=dict)  # Simulated network growth
 
     # -- Performance & Stats --
     hash_rate_cache: float = 0.0
@@ -51,6 +52,7 @@ class GameState:
     PRICE_HISTORY_SAMPLE_SEC: int = 60
     PRICE_HISTORY_MAX_POINTS: int = 720
     HASHRATE_JITTER_PCT: float = 0.01
+    TARGET_BLOCK_TIME: ClassVar[float] = 10.0  # Seconds per block (gameplay speed)
 
     def __post_init__(self) -> None:
         """Initialize default values and migrate legacy save data."""
@@ -64,6 +66,7 @@ class GameState:
             self.coin_prices.setdefault(code, float(meta["base_price"]))
             self.coin_difficulties.setdefault(code, float(meta["base_difficulty"]))
             self.coin_network_targets.setdefault(code, float(meta["network_target"]))
+            self.coin_competition.setdefault(code, 0.0)
             self.price_history_by_coin.setdefault(code, [])
 
         # Migration: Legacy single-coin save to multi-coin wallet
@@ -127,35 +130,55 @@ class GameState:
     def _calculate_reward(self, hashrate: float, dt: float) -> float:
         """
         Calculate reward based on hashrate (PPS - Pay Per Share model).
-
-        This provides a realistic 'pool mining' experience where reward
-        scales linearly with hashrate, rather than a lottery.
+        
+        Implements a 'Saturation' model where the network difficulty
+        scales linearly with total hashrate (Base + User + Competition).
+        This prevents infinite exponential rewards and simulates a real
+        blockchain network adjusting to new hashpower.
         """
         if hashrate <= 0:
             return 0.0
 
-        # 1. Determine Network Difficulty (Total Expected Hashes per Block)
-        #    We use the coin's network target scaled by the current difficulty multiplier.
-        base_target = self.coin_network_targets.get(
+        # 1. Determine Base Network Hashrate
+        #    Derived from the coin's target hashes per block at difficulty 1.0
+        #    and our target block time (10s).
+        base_target_hashes = self.coin_network_targets.get(
             self.active_coin, self.COINS[self.active_coin]["network_target"]
         )
-        network_difficulty_hashes = max(0.0001, self.difficulty) * max(1.0, base_target)
+        base_network_hashrate = base_target_hashes / self.TARGET_BLOCK_TIME
 
-        # 2. Calculate User's Contribution (Hashes Submitted)
-        #    Apply the 'block boost' multiplier here to speed up the game.
-        user_hashes = hashrate * dt * max(0.0001, self.block_find_multiplier)
+        # 2. Calculate Total Network Hashrate
+        #    Total = Base (Initial) + User (You) + Competition (Simulated Growth)
+        competition = self.coin_competition.get(self.active_coin, 0.0)
+        total_network_hashrate = base_network_hashrate + hashrate + competition
 
-        # 3. Calculate Share of the Block
-        share_fraction = user_hashes / network_difficulty_hashes
+        # 3. Calculate User's Share of the Network
+        #    This is the fraction of blocks the user is expected to find.
+        #    As UserHashrate increases, this approaches 1.0 (100%), but never exceeds it.
+        network_share = hashrate / max(1.0, total_network_hashrate)
 
-        # 4. Calculate Reward
-        block_reward = reward_for_coin(self.active_coin, self.difficulty)
-        reward = share_fraction * block_reward
+        # 4. Calculate Expected Blocks Found in this tick (dt)
+        #    Global Emission = 1 block / TARGET_BLOCK_TIME
+        blocks_per_second = 1.0 / self.TARGET_BLOCK_TIME
+        expected_blocks = blocks_per_second * network_share * dt * self.block_find_multiplier
 
-        # 5. Simulate "Block Found" event for UI stats (Bernoulli trial)
-        #    Probability of finding a full block in this tick.
-        if random.random() < share_fraction:
-            self.blocks_found += 1
+        # 5. Update Difficulty for UI
+        #    Difficulty is essentially the multiplier of the base network hashrate.
+        #    If Total = 2 * Base, Difficulty = 2.0.
+        real_difficulty = total_network_hashrate / max(1.0, base_network_hashrate)
+        self.difficulty = real_difficulty
+        self.coin_difficulties[self.active_coin] = float(self.difficulty)
+
+        # 6. Calculate Reward
+        #    Block reward may drop as difficulty increases (halving simulation)
+        block_val = reward_for_coin(self.active_coin, self.difficulty)
+        reward = expected_blocks * block_val
+
+        # 7. Simulate "Block Found" event for UI stats (Bernoulli trial)
+        #    Probability of finding at least one block in this tick.
+        #    For high hashrates, this is just 1.0, but we track count.
+        if random.random() < (expected_blocks / max(1.0, self.block_find_multiplier)):
+             self.blocks_found += 1
 
         return reward
 
@@ -212,15 +235,16 @@ class GameState:
         self.price = max(0.00000001, self.price + drift)
         self.coin_prices[self.active_coin] = float(self.price)
 
-        # Difficulty Adjustment
-        # Scales logarithmically based on how much the user exceeds recommended hashrate
-        base_diff = float(self.COINS[self.active_coin]["base_difficulty"])
-        rec_hashrate = float(self.COINS[self.active_coin].get("recommended_hashrate", 1.0))
-
-        ratio = hashrate / max(1.0, rec_hashrate)
-        # Logarithmic scaling: difficulty grows slower than hashrate
-        self.difficulty = max(0.1, base_diff + math.log10(1.0 + max(0.0, ratio)))
-        self.coin_difficulties[self.active_coin] = float(self.difficulty)
+        # Difficulty is now updated in _calculate_reward based on real-time network stats.
+        # Here we simulate "Competition Growth" (Difficulty increasing over time).
+        
+        # If the coin is profitable (price is high), competition enters.
+        # Simple logic: Random small growth.
+        growth_chance = 0.1
+        if random.random() < growth_chance:
+            # Growth is proportional to current difficulty to keep it relevant
+            growth_amount = self.difficulty * 0.001 * self.COINS[self.active_coin]["network_target"] / self.TARGET_BLOCK_TIME
+            self.coin_competition[self.active_coin] = self.coin_competition.get(self.active_coin, 0.0) + growth_amount
 
     def _record_price_history(self) -> None:
         """Sample current price into history buffers."""
@@ -293,8 +317,10 @@ class GameState:
         if upgrade_id == "efficiency_boost" and self.money >= 500:
             self.money -= 500
             # Permanent difficulty reduction for active coin
-            self.difficulty = max(0.1, self.difficulty - 0.1)
-            self.coin_difficulties[self.active_coin] = float(self.difficulty)
+            # In new model, this could reduce 'competition' or increase 'block_find_multiplier'
+            # Let's make it reduce competition slightly
+            current_comp = self.coin_competition.get(self.active_coin, 0.0)
+            self.coin_competition[self.active_coin] = max(0.0, current_comp * 0.9)
             return True
         return False
 
@@ -328,6 +354,7 @@ class GameState:
             "coin_prices": self.coin_prices,
             "coin_difficulties": self.coin_difficulties,
             "coin_network_targets": self.coin_network_targets,
+            "coin_competition": self.coin_competition,
             "price_history_by_coin": self.price_history_by_coin,
         }
         # Use a temp file or just write directly (simple game)
@@ -372,6 +399,7 @@ class GameState:
             self.coin_prices[coin] = float(meta["base_price"])
             self.coin_difficulties[coin] = float(meta["base_difficulty"])
             self.coin_network_targets[coin] = float(meta["network_target"])
+            self.coin_competition[coin] = 0.0
             self.price_history_by_coin[coin] = []
 
         self._sync_active_view()

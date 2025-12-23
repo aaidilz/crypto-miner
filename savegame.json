@@ -1,38 +1,71 @@
 {
-  "money": 10000.0,
-  "crypto": 0.0,
-  "price": 2e-05,
-  "difficulty": 0.35,
-  "miners_owned": {},
-  "terminal_logs": [],
-  "price_history": [],
-  "blocks_found": 0,
-  "shares_accepted": 0,
-  "shares_rejected": 0,
-  "started_at": 1766455101.7768545,
-  "block_find_multiplier": 1.0,
+  "money": 2886.7738676502154,
+  "crypto": 4.906572735122183e-07,
+  "price": 57563.13713042672,
+  "difficulty": 1.6039905247410153,
+  "miners_owned": {
+    "cpu_basic": 5,
+    "asic_farm": 2,
+    "gpu_12gb": 2
+  },
+  "terminal_logs": [
+    "[    13s] mining   SHIB speed 75.34 kH/s +1557.46087860 (pool)",
+    "[    16s] rejected SHIB speed 74.33 kH/s diff 1.007 a/r 8/1",
+    "[    20s] mining   SHIB speed 75.37 kH/s +1558.32633293 (pool)",
+    "[    24s] mining   SHIB speed 75.08 kH/s +1550.68577223 (pool)",
+    "[    28s] mining   SHIB speed 74.33 kH/s +1536.17089761 (pool)",
+    "[config] active coin set to BTC ($BTC)",
+    "[    62s] rejected BTC speed 74.57 kH/s diff 1.001 a/r 26/2",
+    "[    64s] mining   BTC speed 74.96 kH/s +0.00000000 (pool)",
+    "[    66s] mining   BTC speed 75.07 kH/s +0.00000000 (pool)",
+    "[    71s] mining   BTC speed 75.06 kH/s +0.00000000 (pool)",
+    "[    78s] mining   BTC speed 75.47 kH/s +0.00000000 (pool)",
+    "[   121s] rejected BTC speed 181.00 TH/s diff 1.304 a/r 63/3",
+    "[   132s] rejected BTC speed 178.84 TH/s diff 1.303 a/r 73/4",
+    "[   145s] rejected BTC speed 178.59 TH/s diff 1.302 a/r 85/5",
+    "[ 17925s] mining   BTC speed 361.74 TH/s +0.00093638 (pool)"
+  ],
+  "price_history": [
+    [
+      1766455795.5399175,
+      61153.78794916596
+    ],
+    [
+      1766455855.6087089,
+      59060.34747670459
+    ],
+    [
+      1766473631.1701443,
+      59016.429656221546
+    ]
+  ],
+  "blocks_found": 3,
+  "shares_accepted": 134,
+  "shares_rejected": 5,
+  "started_at": 1766455738.510919,
+  "block_find_multiplier": 25.0,
   "reject_rate": 0.02,
-  "active_coin": "SHIB",
+  "active_coin": "BTC",
   "wallets": {
-    "SHIB": 0.0,
+    "SHIB": 0.4602585189786623,
     "DOGE": 0.0,
     "XMR": 0.0,
     "ETH": 0.0,
-    "BTC": 0.0
+    "BTC": 4.906572735122183e-07
   },
   "coin_prices": {
-    "SHIB": 2e-05,
+    "SHIB": 2.0492020402540517e-05,
     "DOGE": 0.12,
     "XMR": 180.0,
     "ETH": 3200.0,
-    "BTC": 60000.0
+    "BTC": 57563.13713042672
   },
   "coin_difficulties": {
-    "SHIB": 0.35,
+    "SHIB": 1.0082290764718986,
     "DOGE": 1.25,
     "XMR": 2.25,
     "ETH": 3.25,
-    "BTC": 5.0
+    "BTC": 1.6039905247410153
   },
   "coin_network_targets": {
     "SHIB": 120000000.0,
@@ -41,11 +74,36 @@
     "ETH": 60000000000.0,
     "BTC": 6000000000000000.0
   },
+  "coin_competition": {
+    "SHIB": 24162.05407684169,
+    "DOGE": 0.0,
+    "XMR": 0.0,
+    "ETH": 0.0,
+    "BTC": 5838858268801.779
+  },
   "price_history_by_coin": {
-    "SHIB": [],
+    "SHIB": [
+      [
+        1766455746.7347531,
+        1.99820320533579e-05
+      ]
+    ],
     "DOGE": [],
     "XMR": [],
     "ETH": [],
-    "BTC": []
+    "BTC": [
+      [
+        1766455795.5399175,
+        61153.78794916596
+      ],
+      [
+        1766455855.6087089,
+        59060.34747670459
+      ],
+      [
+        1766473631.1701443,
+        59016.429656221546
+      ]
+    ]
   }
 }
