@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, flash
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
 from game_state import GameState
 from miners import AVAILABLE_MINERS
 
@@ -26,7 +26,103 @@ def dashboard():
         difficulty=round(game.difficulty, 3),
         hashrate=round(game.recalc_hashrate(), 2),
         miners_owned=game.miners_owned,
+        blocks_found=game.blocks_found,
+        shares_accepted=game.shares_accepted,
+        shares_rejected=game.shares_rejected,
     )
+
+
+@app.route("/api/state")
+def api_state():
+    return jsonify(
+        {
+            "money": round(game.money, 2),
+            "crypto": round(game.crypto, 6),
+            "price": round(game.price, 4),
+            "difficulty": round(game.difficulty, 4),
+            "hashrate": round(game.recalc_hashrate(), 2),
+            "miners_owned": game.miners_owned,
+            "blocks_found": game.blocks_found,
+            "shares_accepted": game.shares_accepted,
+            "shares_rejected": game.shares_rejected,
+            "mining_config": {
+                "network_target": game.network_target,
+                "block_find_multiplier": game.block_find_multiplier,
+                "reject_rate": game.reject_rate,
+            },
+        }
+    )
+
+
+@app.route("/api/config", methods=["GET", "POST"])
+def api_config():
+    if request.method == "GET":
+        return jsonify(
+            {
+                "network_target": game.network_target,
+                "block_find_multiplier": game.block_find_multiplier,
+                "reject_rate": game.reject_rate,
+            }
+        )
+
+    payload = request.get_json(silent=True) or {}
+    game.set_mining_config(
+        block_find_multiplier=payload.get("block_find_multiplier"),
+        reject_rate=payload.get("reject_rate"),
+        network_target=payload.get("network_target"),
+    )
+    game.save()
+    return jsonify(
+        {
+            "ok": True,
+            "network_target": game.network_target,
+            "block_find_multiplier": game.block_find_multiplier,
+            "reject_rate": game.reject_rate,
+        }
+    )
+
+
+@app.route("/api/mine_tick", methods=["POST"])
+def api_mine_tick():
+    # One mining tick (used by auto-miner UI)
+    before_logs = len(game.terminal_logs)
+    game.mining_tick()
+    game.save()
+    new_logs = game.terminal_logs[before_logs:]
+    return jsonify(
+        {
+            "reward": 0,  # reward is already reflected in crypto; kept for compatibility
+            "state": {
+                "money": round(game.money, 2),
+                "crypto": round(game.crypto, 6),
+                "price": round(game.price, 4),
+                "difficulty": round(game.difficulty, 4),
+                "hashrate": round(game.recalc_hashrate(), 2),
+                "blocks_found": game.blocks_found,
+                "shares_accepted": game.shares_accepted,
+                "shares_rejected": game.shares_rejected,
+            },
+            "logs": new_logs[-50:],
+        }
+    )
+
+
+@app.route("/api/terminal")
+def api_terminal():
+    try:
+        last = int(request.args.get("last", "200"))
+    except ValueError:
+        last = 200
+    return jsonify({"logs": game.get_terminal_logs(last=last)})
+
+
+@app.route("/api/price_history")
+def api_price_history():
+    try:
+        minutes = int(request.args.get("minutes", "60"))
+    except ValueError:
+        minutes = 60
+    return jsonify({"history": game.get_price_history(minutes=minutes)})
 
 
 @app.route("/mine", methods=["POST"])

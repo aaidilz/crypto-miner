@@ -1,38 +1,303 @@
 {% extends "base.html" %}
 {% block content %}
-  <div class="card">
-    <h2>Status</h2>
-    <p><strong>Money:</strong> ${{ money }}</p>
-    <p><strong>Crypto:</strong> {{ crypto }}</p>
-    <p><strong>Price:</strong> ${{ price }} per coin</p>
-    <p><strong>Difficulty:</strong> {{ difficulty }}</p>
-    <p><strong>Hashrate:</strong> {{ hashrate }}</p>
-    <form method="post" action="/mine">
-      <button type="submit">Mine (1 tick)</button>
-    </form>
-    <form method="post" action="/save" style="margin-top:8px;">
-      <button type="submit">Save Game</button>
-    </form>
+  <div class="grid">
+    <div>
+      <div class="card">
+        <div class="row-between">
+          <div>
+            <h2 style="margin:0; font-size:16px;">Rig Dashboard</h2>
+            <div class="muted" style="margin-top:2px;">mine → solve_block → reward → wallet</div>
+          </div>
+          <div class="row">
+            <button id="btnStart">Start Mining</button>
+            <button id="btnStop" class="danger" disabled>Stop</button>
+          </div>
+        </div>
+
+        <div class="row" style="margin-top:10px;">
+          <div>
+            <label>Refresh rate</label><br>
+            <select id="tickMs">
+              <option value="250">250 ms</option>
+              <option value="500">500 ms</option>
+              <option value="1000" selected>1 s</option>
+              <option value="2000">2 s</option>
+              <option value="5000">5 s</option>
+            </select>
+          </div>
+          <div>
+            <label>Chart timeframe</label><br>
+            <select id="chartMinutes">
+              <option value="1">1 min</option>
+              <option value="5">5 min</option>
+              <option value="15">15 min</option>
+              <option value="60" selected>60 min</option>
+            </select>
+          </div>
+          <div>
+            <label>Chart update</label><br>
+            <select id="chartMs">
+              <option value="5000">5 s</option>
+              <option value="15000">15 s</option>
+              <option value="60000" selected>60 s</option>
+            </select>
+          </div>
+          <div>
+            <label>Block boost</label><br>
+            <select id="blockBoost">
+              <option value="0.5">x0.5</option>
+              <option value="1" selected>x1</option>
+              <option value="2">x2</option>
+              <option value="5">x5</option>
+              <option value="10">x10</option>
+              <option value="25">x25</option>
+            </select>
+          </div>
+          <div>
+            <label>Reject rate</label><br>
+            <select id="rejectRate">
+              <option value="0">0%</option>
+              <option value="0.01">1%</option>
+              <option value="0.02" selected>2%</option>
+              <option value="0.05">5%</option>
+              <option value="0.10">10%</option>
+            </select>
+          </div>
+          <div style="flex:1"></div>
+          <form method="post" action="/save" class="row" style="margin:0;">
+            <button type="submit" class="secondary">Save</button>
+          </form>
+        </div>
+
+        <div style="display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 12px;">
+          <div class="card" style="padding:10px;">
+            <div class="muted">Money</div>
+            <div style="font-size:16px; font-weight:700;" id="vMoney">${{ money }}</div>
+          </div>
+          <div class="card" style="padding:10px;">
+            <div class="muted">Wallet (coins)</div>
+            <div style="font-size:16px; font-weight:700;" id="vCrypto">{{ crypto }}</div>
+          </div>
+          <div class="card" style="padding:10px;">
+            <div class="muted">Price</div>
+            <div style="font-size:16px; font-weight:700;" id="vPrice">${{ price }}</div>
+          </div>
+          <div class="card" style="padding:10px;">
+            <div class="muted">Difficulty</div>
+            <div style="font-size:16px; font-weight:700;" id="vDiff">{{ difficulty }}</div>
+          </div>
+          <div class="card" style="padding:10px;">
+            <div class="muted">Hashrate</div>
+            <div style="font-size:16px; font-weight:700;" id="vHR">{{ hashrate }} H/s</div>
+          </div>
+          <div class="card" style="padding:10px;">
+            <div class="muted">Blocks / Shares</div>
+            <div style="font-size:16px; font-weight:700;" id="vShares">{{ blocks_found }} / {{ shares_accepted }}/{{ shares_rejected }}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row-between">
+          <h3 style="margin:0; font-size:14px;">Sell Crypto</h3>
+          <div class="muted">game loop: mine → sell → upgrade → repeat</div>
+        </div>
+        <form method="post" action="/sell" class="row" style="margin-top:10px;">
+          <div>
+            <label>Amount</label><br>
+            <input name="amount" value="0.1" style="width:140px;">
+          </div>
+          <button type="submit">Sell</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <h3 style="margin:0 0 8px 0; font-size:14px;">Owned Miners</h3>
+        {% if miners_owned %}
+          <div class="muted" style="margin-bottom:8px;">Tip: buy more rigs in Shop to increase H/s.</div>
+          <ul style="margin:0; padding-left:18px;">
+            {% for key, count in miners_owned.items() %}
+              <li>{{ key }}: {{ count }}</li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <div class="muted">No miners owned yet. Go to Shop to buy your first rig.</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <div class="row-between">
+          <h3 style="margin:0; font-size:14px;">Price Chart</h3>
+          <div class="muted">auto-updated</div>
+        </div>
+        <div style="margin-top:10px;">
+          <canvas id="priceChart" height="140"></canvas>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row-between">
+          <h3 style="margin:0; font-size:14px;">XMRig Terminal (simulated)</h3>
+          <button id="btnClear" class="secondary">Clear</button>
+        </div>
+        <div id="terminal" class="terminal" style="margin-top:10px;"></div>
+      </div>
+    </div>
   </div>
 
-  <div class="card">
-    <h3>Sell Crypto</h3>
-    <form method="post" action="/sell">
-      <label>Amount: <input name="amount" value="0.1"></label>
-      <button type="submit">Sell</button>
-    </form>
-  </div>
+  <script>
+    const btnStart = document.getElementById('btnStart');
+    const btnStop = document.getElementById('btnStop');
+    const btnClear = document.getElementById('btnClear');
+    const terminalEl = document.getElementById('terminal');
 
-  <div class="card">
-    <h3>Owned Miners</h3>
-    {% if miners_owned %}
-      <ul>
-        {% for key, count in miners_owned.items() %}
-          <li>{{ key }}: {{ count }}</li>
-        {% endfor %}
-      </ul>
-    {% else %}
-      <p>No miners owned yet.</p>
-    {% endif %}
-  </div>
+    const vMoney = document.getElementById('vMoney');
+    const vCrypto = document.getElementById('vCrypto');
+    const vPrice = document.getElementById('vPrice');
+    const vDiff = document.getElementById('vDiff');
+    const vHR = document.getElementById('vHR');
+    const vShares = document.getElementById('vShares');
+
+    const tickMsSel = document.getElementById('tickMs');
+    const chartMinutesSel = document.getElementById('chartMinutes');
+    const chartMsSel = document.getElementById('chartMs');
+    const blockBoostSel = document.getElementById('blockBoost');
+    const rejectRateSel = document.getElementById('rejectRate');
+
+    let minerTimer = null;
+    let chartTimer = null;
+
+    function appendLines(lines) {
+      for (const line of lines) {
+        const div = document.createElement('div');
+        div.textContent = line;
+        terminalEl.appendChild(div);
+      }
+      terminalEl.scrollTop = terminalEl.scrollHeight;
+    }
+
+    function clearTerminal() {
+      terminalEl.innerHTML = '';
+    }
+
+    function setRunning(isRunning) {
+      btnStart.disabled = isRunning;
+      btnStop.disabled = !isRunning;
+      tickMsSel.disabled = isRunning;
+    }
+
+    async function mineTick() {
+      const res = await fetch('/api/mine_tick', { method: 'POST' });
+      if (!res.ok) return;
+      const payload = await res.json();
+      const s = payload.state;
+      vMoney.textContent = `$${s.money.toFixed(2)}`;
+      vCrypto.textContent = s.crypto.toFixed(6);
+      vPrice.textContent = `$${s.price.toFixed(4)}`;
+      vDiff.textContent = s.difficulty.toFixed(4);
+      vHR.textContent = `${s.hashrate.toFixed(2)} H/s`;
+      vShares.textContent = `${s.blocks_found} / ${s.shares_accepted}/${s.shares_rejected}`;
+
+      if (payload.logs && payload.logs.length) appendLines(payload.logs);
+    }
+
+    async function pushConfig() {
+      const block_find_multiplier = parseFloat(blockBoostSel.value);
+      const reject_rate = parseFloat(rejectRateSel.value);
+      await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ block_find_multiplier, reject_rate })
+      });
+    }
+
+    async function pullConfig() {
+      const res = await fetch('/api/config');
+      if (!res.ok) return;
+      const cfg = await res.json();
+      if (cfg.block_find_multiplier != null) blockBoostSel.value = String(cfg.block_find_multiplier);
+      if (cfg.reject_rate != null) rejectRateSel.value = String(cfg.reject_rate);
+    }
+
+    // Chart
+    const chartCtx = document.getElementById('priceChart').getContext('2d');
+    const priceChart = new Chart(chartCtx, {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: [{
+          label: 'Price',
+          data: [],
+          borderColor: 'rgba(34,197,94,0.85)',
+          backgroundColor: 'rgba(34,197,94,0.15)',
+          tension: 0.25,
+          fill: true,
+          pointRadius: 0,
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color: 'rgba(229,231,235,0.7)' }, grid: { color: 'rgba(255,255,255,0.06)' } },
+          y: { ticks: { color: 'rgba(229,231,235,0.7)' }, grid: { color: 'rgba(255,255,255,0.06)' } }
+        }
+      }
+    });
+
+    async function refreshChart() {
+      const minutes = parseInt(chartMinutesSel.value, 10);
+      const res = await fetch(`/api/price_history?minutes=${minutes}`);
+      if (!res.ok) return;
+      const payload = await res.json();
+      const hist = payload.history || [];
+      priceChart.data.labels = hist.map(p => new Date(p.t * 1000).toLocaleTimeString());
+      priceChart.data.datasets[0].data = hist.map(p => p.price);
+      priceChart.update();
+    }
+
+    function startChartTimer() {
+      if (chartTimer) clearInterval(chartTimer);
+      const ms = parseInt(chartMsSel.value, 10);
+      refreshChart();
+      chartTimer = setInterval(refreshChart, ms);
+    }
+
+    function startMining() {
+      if (minerTimer) clearInterval(minerTimer);
+      const ms = parseInt(tickMsSel.value, 10);
+      setRunning(true);
+      mineTick();
+      minerTimer = setInterval(mineTick, ms);
+    }
+
+    function stopMining() {
+      if (minerTimer) clearInterval(minerTimer);
+      minerTimer = null;
+      setRunning(false);
+    }
+
+    btnStart.addEventListener('click', startMining);
+    btnStop.addEventListener('click', stopMining);
+    btnClear.addEventListener('click', clearTerminal);
+    chartMinutesSel.addEventListener('change', refreshChart);
+    chartMsSel.addEventListener('change', startChartTimer);
+    blockBoostSel.addEventListener('change', pushConfig);
+    rejectRateSel.addEventListener('change', pushConfig);
+
+    // init
+    setRunning(false);
+    startChartTimer();
+    pullConfig();
+
+    // warm terminal with last logs (if any)
+    (async () => {
+      const res = await fetch('/api/terminal?last=120');
+      if (!res.ok) return;
+      const payload = await res.json();
+      if (payload.logs) appendLines(payload.logs);
+    })();
+  </script>
 {% endblock %}
